@@ -1,0 +1,13 @@
+{
+  "name": "PaisaLog",
+  "short_name": "PaisaLog",
+  "description": "A personal expense ledger that writes straight to your own Google Sheet.",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#faf6ee",
+  "theme_color": "#faf6ee",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
