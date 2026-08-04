@@ -1,21 +1,22 @@
-import { NextResponse } from 'next/server';
-import { auth } from '@/auth';
-import { createUserSheet } from '@/lib/sheetsApi';
+import { auth } from "@/auth";
+import { NextResponse } from "next/server";
 
 export async function POST() {
   const session = await auth();
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
-  }
-  if (session.sheetId) {
-    return NextResponse.json({ sheetId: session.sheetId, alreadyExisted: true });
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  try {
-    const sheetId = await createUserSheet(session.accessToken);
-    return NextResponse.json({ sheetId, alreadyExisted: false });
-  } catch (err) {
-    console.error('Failed to create sheet:', err);
-    return NextResponse.json({ error: 'Failed to create sheet' }, { status: 500 });
+  // Single-user override: use the existing bot sheet instead of creating a new one
+  if (session.user.email === process.env.OWNER_EMAIL) {
+    if (!process.env.PAISALOG_SHEET_ID) {
+      return NextResponse.json(
+        { error: "PAISALOG_SHEET_ID not configured" },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({ sheetId: process.env.PAISALOG_SHEET_ID });
   }
+
+  // ... existing spreadsheets.create logic for any other user stays below, unchanged
 }
