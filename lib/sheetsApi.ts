@@ -1,138 +1,202 @@
-import { google, sheets_v4 } from 'googleapis';
-
-const TRANSACTION_HEADERS = [
-  'Expense Type', 'Category', 'Amount', 'Merchant',
-  'Rate', 'Qty', 'Date', 'Notes', 'Source', 'Timestamp',
+const SHEET_HEADERS = [
+  "Expense Type", "Category", "Merchant", "Rate", "Qty", "Amount",
+  "Date", "Final Bill", "Notes", "Source", "Raw OCR Ref", "Timestamp"
 ];
 
-function getSheetsClient(accessToken: string): sheets_v4.Sheets {
-  const auth = new google.auth.OAuth2();
-  auth.setCredentials({ access_token: accessToken });
-  return google.sheets({ version: 'v4', auth });
+function getMonthTabName(date: Date): string {
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  return `${months[date.getMonth()]} ${date.getFullYear()}`;
 }
 
-/**
- * Creates a brand-new Google Sheet in the signed-in user's own Drive,
- * pre-populated with a "Meta" tab (parity with the bot's design — reserved
- * for future bookkeeping like last-touched-row tracking) and the current
- * month's transactions tab. Returns the new spreadsheet's ID.
- */
-export async function createUserSheet(accessToken: string): Promise<string> {
-  const sheets = getSheetsClient(accessToken);
-  const monthTab = monthTabName();
+// Parses "DD/MM/YYYY" (the format the Sheet's column G actually uses).
+// Do NOT use `new Date(string)` on sheet dates anywhere in this file —
+// JS's native parser assumes MM/DD/YYYY and will silently misread dates
+// like 04/08/2026 (4th August) as an invalid or wrong date.
+function parseSheetDate(value: string): Date {
+  const [day, month, year] = value.split("/").map(Number);
+  return new Date(year, month - 1, day);
+}
 
-  const created = await sheets.spreadsheets.create({
-    requestBody: {
-      properties: { title: 'PaisaLog Expenses' },
-      sheets: [{ properties: { title: 'Meta' } }, { properties: { title: monthTab } }],
-    },
-  });
+// Formats a Date back into "DD/MM/YYYY" for writing to column G
+function formatSheetDate(date: Date): string {
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
 
-  const spreadsheetId = created.data.spreadsheetId!;
-  const monthTabSheetId = created.data.sheets?.find((s) => s.properties?.title === monthTab)?.properties?.sheetId;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range: `${monthTab}!A1`,
-    valueInputOption: 'RAW',
-    requestBody: { values: [TRANSACTION_HEADERS] },
-  });
-
-  if (monthTabSheetId !== undefined) {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: [
-          { updateSheetProperties: { properties: { sheetId: monthTabSheetId, gridProperties: { frozenRowCount: 1 } }, fields: 'gridProperties.frozenRowCount' } },
-        ],
+async function sheetsRequest(
+  accessToken: string,
+  spreadsheetId: string,
+  path: string,
+  method: string,
+  body?: unknown
+) {
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}${path}`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
       },
-    });
+      body: body ? JSON.stringify(body) : undefined,
+    }
+  );
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Sheets API error (${res.status}): ${err}`);
   }
-
-  return spreadsheetId;
+  return res.json();
 }
 
-/** "July 2026" for today, or for a given DD/MM/YYYY date string — same routing concept as the bot. */
-export function monthTabName(ddmmyyyy?: string): string {
-  let d: Date | null = null;
-  if (ddmmyyyy) {
-    const m = ddmmyyyy.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (m) d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+// Returns the sheetId (numeric, internal to the spreadsheet) for a tab name,
+// creating the tab with headers if it doesn't exist yet.
+async function ensureMonthTab(
+  accessToken: string,
+  spreadsheetId: string,
+  tabName: string
+): Promise<number> {
+  const meta = await sheetsRequest(accessToken, spreadsheetId, "", "GET");
+  const existing = meta.sheets?.find(
+    (s: any) => s.properties.title === tabName
+  );
+  if (existing) return existing.properties.sheetId;
+
+  const created = await sheetsRequest(accessToken, spreadsheetId, ":batchUpdate", "POST", {
+    requests: [
+      { addSheet: { properties: { title: tabName } } },
+    ],
+  });
+  const newSheetId = created.replies[0].addSheet.properties.sheetId;
+
+  // Write header row
+  await sheetsRequest(
+    accessToken,
+    spreadsheetId,
+    `/values/${encodeURIComponent(tabName)}!A1:L1?valueInputOption=RAW`,
+    "PUT",
+    { values: [SHEET_HEADERS] }
+  );
+
+  return newSheetId;
+}
+
+// Finds the correct 0-indexed row to insert at, so column G (Date) stays
+// in chronological order. Row 0 is the header — never inserts above it.
+async function findInsertRowIndex(
+  accessToken: string,
+  spreadsheetId: string,
+  tabName: string,
+  expenseDate: Date
+): Promise<number> {
+  const data = await sheetsRequest(
+    accessToken,
+    spreadsheetId,
+    `/values/${encodeURIComponent(tabName)}!G2:G`,
+    "GET"
+  );
+  const dates: string[] = (data.values || []).map((r: string[]) => r[0]);
+
+  // Rows are already date-ordered; walk until we find a later date.
+  for (let i = 0; i < dates.length; i++) {
+    if (!dates[i]) continue; // blank spacer row
+    const rowDate = parseSheetDate(dates[i]);
+    if (rowDate > expenseDate) {
+      return i + 1; // +1 to account for header row at index 0
+    }
   }
-  if (!d || isNaN(d.getTime())) d = new Date();
-  return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  return dates.length + 1; // append at end
 }
 
-async function getOrCreateMonthSheet(sheets: sheets_v4.Sheets, spreadsheetId: string, tabName: string) {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId });
-  const existing = meta.data.sheets?.find((s) => s.properties?.title === tabName);
-  if (existing) return;
-
-  await sheets.spreadsheets.batchUpdate({
+export async function insertExpenseRowOrdered(
+  accessToken: string,
+  spreadsheetId: string,
+  expense: {
+    expenseType: string;
+    category: string;
+    merchant: string;
+    rate: number;
+    qty: number;
+    amount: number;
+    date: string; // must be DD/MM/YYYY, matching column G's format
+    finalBill: number;
+    notes: string;
+    source: "Web" | "Telegram";
+    rawOcrRef?: string;
+  }
+) {
+  const expenseDate = parseSheetDate(expense.date);
+  const tabName = getMonthTabName(expenseDate);
+  const sheetId = await ensureMonthTab(accessToken, spreadsheetId, tabName);
+  const insertRowIndex = await findInsertRowIndex(
+    accessToken,
     spreadsheetId,
-    requestBody: { requests: [{ addSheet: { properties: { title: tabName } } }] },
+    tabName,
+    expenseDate
+  );
+
+  const rowValues = [
+    expense.expenseType,
+    expense.category,
+    expense.merchant,
+    expense.rate,
+    expense.qty,
+    expense.amount,
+    formatSheetDate(expenseDate),
+    expense.finalBill,
+    expense.notes,
+    expense.source,
+    expense.rawOcrRef || "",
+    new Date().toISOString(),
+  ];
+
+  // Insert 2 rows: the entry row + a blank spacer row after it,
+  // matching the bot's readability convention.
+  await sheetsRequest(accessToken, spreadsheetId, ":batchUpdate", "POST", {
+    requests: [
+      {
+        insertDimension: {
+          range: {
+            sheetId,
+            dimension: "ROWS",
+            startIndex: insertRowIndex,
+            endIndex: insertRowIndex + 2,
+          },
+          inheritFromBefore: false,
+        },
+      },
+    ],
   });
-  await sheets.spreadsheets.values.update({
+
+  await sheetsRequest(
+    accessToken,
     spreadsheetId,
-    range: `${tabName}!A1`,
-    valueInputOption: 'RAW',
-    requestBody: { values: [TRANSACTION_HEADERS] },
-  });
+    `/values/${encodeURIComponent(tabName)}!A${insertRowIndex + 1}:L${insertRowIndex + 1}?valueInputOption=USER_ENTERED`,
+    "PUT",
+    { values: [rowValues] }
+  );
+
+  // Sync Meta tab so /last, /undo, /setcategory on Telegram stay accurate
+  await updateMeta(accessToken, spreadsheetId, tabName, insertRowIndex + 1);
+
+  return { tabName, rowNumber: insertRowIndex + 1 };
 }
 
-export interface ExpenseInput {
-  expenseType: string;
-  category: string;
-  amount: number;
-  merchant?: string;
-  rate?: number | '';
-  qty?: number | '';
-  date?: string; // DD/MM/YYYY; defaults to today
-  notes?: string;
-  source: 'Web-Text' | 'Web-OCR';
-}
-
-/** Appends one expense row, routing to (and creating, if needed) the correct month tab — same date-routing concept as the bot. */
-export async function appendExpense(accessToken: string, spreadsheetId: string, expense: ExpenseInput) {
-  const sheets = getSheetsClient(accessToken);
-  const dateStr = expense.date || todayDdMmYyyy();
-  const tabName = monthTabName(dateStr);
-
-  await getOrCreateMonthSheet(sheets, spreadsheetId, tabName);
-
-  await sheets.spreadsheets.values.append({
+async function updateMeta(
+  accessToken: string,
+  spreadsheetId: string,
+  tabName: string,
+  rowNumber: number
+) {
+  await sheetsRequest(
+    accessToken,
     spreadsheetId,
-    range: `${tabName}!A:J`,
-    valueInputOption: 'USER_ENTERED',
-    insertDataOption: 'INSERT_ROWS',
-    requestBody: {
-      values: [[
-        expense.expenseType,
-        expense.category,
-        expense.amount,
-        expense.merchant || '',
-        expense.rate ?? '',
-        expense.qty ?? '',
-        dateStr,
-        expense.notes || '',
-        expense.source,
-        new Date().toISOString(),
-      ]],
-    },
-  });
-}
-
-/** Reads the most recent rows from a given month tab, for the dashboard. */
-export async function listRecentExpenses(accessToken: string, spreadsheetId: string, tabName: string, limit = 20) {
-  const sheets = getSheetsClient(accessToken);
-  const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: `${tabName}!A2:J` });
-  const rows = res.data.values || [];
-  return rows.slice(-limit).reverse();
-}
-
-function todayDdMmYyyy(): string {
-  const d = new Date();
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  return `${dd}/${mm}/${d.getFullYear()}`;
+    `/values/Meta!A2:A3?valueInputOption=RAW`,
+    "PUT",
+    { values: [[tabName], [rowNumber]] }
+  );
 }
