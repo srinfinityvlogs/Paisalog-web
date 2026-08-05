@@ -170,6 +170,45 @@ select:focus {
   color: var(--ink);
 }
 
+/* --- Month navigation (prev/next arrows around the tab name) --- */
+.month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.month-nav-label {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  min-width: 150px;
+  text-align: center;
+}
+
+.month-nav-arrow {
+  background: transparent;
+  border: 1px solid var(--paper-line);
+  border-radius: 3px;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+
+.month-nav-arrow:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.month-nav-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .sheet-link-line {
   display: flex;
   align-items: baseline;

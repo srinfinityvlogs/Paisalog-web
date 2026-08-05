@@ -12,6 +12,11 @@ type Expense = {
   source: string;
 };
 
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 // Returns today's date as "YYYY-MM-DD", the format <input type="date"> requires.
 function todayIso(): string {
   const d = new Date();
@@ -36,6 +41,10 @@ function parseSheetDate(value: string): Date | null {
   const [dd, mm, yyyy] = parts.map(Number);
   if (!dd || !mm || !yyyy) return null;
   return new Date(yyyy, mm - 1, dd);
+}
+
+function tabNameForMonth(year: number, monthIndex0: number): string {
+  return `${MONTH_NAMES[monthIndex0]} ${year}`;
 }
 
 function formatAmount(raw: string): string {
@@ -97,6 +106,16 @@ export default function DashboardPage() {
   const [statusMsg, setStatusMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
 
+  // The month currently being viewed. Defaults to the current month;
+  // "next" is disabled once this reaches the current month so you can't
+  // navigate into the future.
+  const now = new Date();
+  const [viewYear, setViewYear] = useState(now.getFullYear());
+  const [viewMonthIndex, setViewMonthIndex] = useState(now.getMonth());
+
+  const isCurrentMonth = viewYear === now.getFullYear() && viewMonthIndex === now.getMonth();
+  const viewTabName = tabNameForMonth(viewYear, viewMonthIndex);
+
   // First-ever visit: this session has no Sheet yet — create one and persist
   // its ID into the session token via update().
   useEffect(() => {
@@ -110,16 +129,36 @@ export default function DashboardPage() {
       .finally(() => setSettingUp(false));
   }, [status, session?.sheetId, settingUp, update]);
 
-  async function loadExpenses() {
-    const res = await fetch('/api/expenses/recent');
+  async function loadExpenses(tabName: string) {
+    setExpenses(null);
+    const res = await fetch(`/api/expenses/recent?month=${encodeURIComponent(tabName)}`);
     const data = await res.json();
     setExpenses(data.expenses || []);
   }
 
   useEffect(() => {
-    if (session?.sheetId) loadExpenses();
+    if (session?.sheetId) loadExpenses(viewTabName);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.sheetId]);
+  }, [session?.sheetId, viewTabName]);
+
+  function goToPreviousMonth() {
+    if (viewMonthIndex === 0) {
+      setViewYear((y) => y - 1);
+      setViewMonthIndex(11);
+    } else {
+      setViewMonthIndex((m) => m - 1);
+    }
+  }
+
+  function goToNextMonth() {
+    if (isCurrentMonth) return;
+    if (viewMonthIndex === 11) {
+      setViewYear((y) => y + 1);
+      setViewMonthIndex(0);
+    } else {
+      setViewMonthIndex((m) => m + 1);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -150,7 +189,9 @@ export default function DashboardPage() {
       setCategory('');
       setAmount('');
       setDate(todayIso());
-      loadExpenses();
+      // If the entry was logged into the month currently being viewed,
+      // refresh it. Otherwise leave the current view alone.
+      if (data.tabName === viewTabName) loadExpenses(viewTabName);
     } catch (err) {
       setStatusMsg({ text: err instanceof Error ? err.message : 'Failed to save', error: true });
     } finally {
@@ -232,8 +273,29 @@ export default function DashboardPage() {
           </div>
 
           <div className="card">
+            <div className="month-nav">
+              <button
+                type="button"
+                className="month-nav-arrow"
+                onClick={goToPreviousMonth}
+                aria-label="Previous month"
+              >
+                ‹
+              </button>
+              <span className="month-nav-label">{viewTabName}</span>
+              <button
+                type="button"
+                className="month-nav-arrow"
+                onClick={goToNextMonth}
+                disabled={isCurrentMonth}
+                aria-label="Next month"
+              >
+                ›
+              </button>
+            </div>
+
             <div className="sheet-link-line">
-              <span>This month</span>
+              <span>{isCurrentMonth ? 'This month' : viewTabName}</span>
               <a href={`https://docs.google.com/spreadsheets/d/${session.sheetId}/edit`} target="_blank" rel="noreferrer">
                 Open full Sheet
               </a>
@@ -250,7 +312,7 @@ export default function DashboardPage() {
 
             {expenses?.length === 0 && (
               <div className="empty-state">
-                The ledger is empty this month. Log your first expense above.
+                The ledger is empty for {viewTabName}.
               </div>
             )}
 
