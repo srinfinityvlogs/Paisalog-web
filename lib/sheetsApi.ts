@@ -1,6 +1,8 @@
+// Column order matches the bot's original Code.gs convention exactly:
+// Expense Type | Category | Amount | Merchant | Rate | Qty | Month | Final Bill | Notes | Source | Raw Input/Raw OCR Text | Timestamp
 const SHEET_HEADERS = [
-  "Expense Type", "Category", "Merchant", "Rate", "Qty", "Amount",
-  "Date", "Final Bill", "Notes", "Source", "Raw OCR Ref", "Timestamp"
+  "Expense Type", "Category", "Amount", "Merchant", "Rate", "Qty",
+  "Month", "Final Bill", "Notes", "Source", "Raw Input/Raw OCR Text", "Timestamp"
 ];
 
 // Returns "August 2026" style tab name for a given date (defaults to today).
@@ -12,7 +14,7 @@ export function monthTabName(date: Date = new Date()): string {
   return `${months[date.getMonth()]} ${date.getFullYear()}`;
 }
 
-// Parses "DD/MM/YYYY" (the format the Sheet's column G actually uses).
+// Parses "DD/MM/YYYY" (the format the Sheet's date column actually uses).
 // Do NOT use `new Date(string)` on sheet dates anywhere in this file —
 // JS's native parser assumes MM/DD/YYYY and will silently misread dates
 // like 04/08/2026 (4th August) as an invalid or wrong date.
@@ -21,7 +23,7 @@ function parseSheetDate(value: string): Date {
   return new Date(year, month - 1, day);
 }
 
-// Formats a Date back into "DD/MM/YYYY" for writing to column G
+// Formats a Date back into "DD/MM/YYYY" for writing to the sheet
 function formatSheetDate(date: Date): string {
   const dd = String(date.getDate()).padStart(2, "0");
   const mm = String(date.getMonth() + 1).padStart(2, "0");
@@ -86,8 +88,8 @@ async function ensureMonthTab(
   return newSheetId;
 }
 
-// Finds the correct 0-indexed row to insert at, so column G (Date) stays
-// in chronological order. Row 0 is the header — never inserts above it.
+// Finds the correct 0-indexed row to insert at, so the date column (G)
+// stays in chronological order. Row 0 is the header — never inserts above it.
 async function findInsertRowIndex(
   accessToken: string,
   spreadsheetId: string,
@@ -123,7 +125,7 @@ export async function insertExpenseRowOrdered(
     rate: number;
     qty: number;
     amount: number;
-    date: string; // must be DD/MM/YYYY, matching column G's format
+    date: string; // must be DD/MM/YYYY
     finalBill: number;
     notes: string;
     source: "Web" | "Telegram";
@@ -140,13 +142,15 @@ export async function insertExpenseRowOrdered(
     expenseDate
   );
 
+  // Order matches the bot's real header layout:
+  // Expense Type, Category, Amount, Merchant, Rate, Qty, Month(date), Final Bill, Notes, Source, Raw Input/Raw OCR Text, Timestamp
   const rowValues = [
     expense.expenseType,
     expense.category,
+    expense.amount,
     expense.merchant,
     expense.rate,
     expense.qty,
-    expense.amount,
     formatSheetDate(expenseDate),
     expense.finalBill,
     expense.notes,
@@ -204,8 +208,8 @@ async function updateMeta(
 
 // Returns the most recent `limit` logged rows (non-blank) from the given
 // month tab, newest first. Row layout matches SHEET_HEADERS:
-// [Expense Type, Category, Merchant, Rate, Qty, Amount, Date, Final Bill,
-//  Notes, Source, Raw OCR Ref, Timestamp]
+// [Expense Type, Category, Amount, Merchant, Rate, Qty, Month(date),
+//  Final Bill, Notes, Source, Raw Input/Raw OCR Text, Timestamp]
 export async function listRecentExpenses(
   accessToken: string,
   spreadsheetId: string,
@@ -226,7 +230,7 @@ export async function listRecentExpenses(
   }
 
   const rows: string[][] = data.values || [];
-  // Drop blank spacer rows (no Date in column G, index 6)
+  // Drop blank spacer rows (no date in column G, index 6)
   const nonBlank = rows.filter((r) => r[6]);
   // Sheet is in chronological (ascending) order — take the last `limit`
   // rows and reverse so the most recent entry comes first.
