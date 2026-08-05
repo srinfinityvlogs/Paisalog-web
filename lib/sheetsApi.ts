@@ -3,7 +3,8 @@ const SHEET_HEADERS = [
   "Date", "Final Bill", "Notes", "Source", "Raw OCR Ref", "Timestamp"
 ];
 
-function getMonthTabName(date: Date): string {
+// Returns "August 2026" style tab name for a given date (defaults to today).
+export function monthTabName(date: Date = new Date()): string {
   const months = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
@@ -130,7 +131,7 @@ export async function insertExpenseRowOrdered(
   }
 ) {
   const expenseDate = parseSheetDate(expense.date);
-  const tabName = getMonthTabName(expenseDate);
+  const tabName = monthTabName(expenseDate);
   const sheetId = await ensureMonthTab(accessToken, spreadsheetId, tabName);
   const insertRowIndex = await findInsertRowIndex(
     accessToken,
@@ -199,4 +200,35 @@ async function updateMeta(
     "PUT",
     { values: [[tabName], [rowNumber]] }
   );
+}
+
+// Returns the most recent `limit` logged rows (non-blank) from the given
+// month tab, newest first. Row layout matches SHEET_HEADERS:
+// [Expense Type, Category, Merchant, Rate, Qty, Amount, Date, Final Bill,
+//  Notes, Source, Raw OCR Ref, Timestamp]
+export async function listRecentExpenses(
+  accessToken: string,
+  spreadsheetId: string,
+  tabName: string,
+  limit: number = 20
+): Promise<string[][]> {
+  let data;
+  try {
+    data = await sheetsRequest(
+      accessToken,
+      spreadsheetId,
+      `/values/${encodeURIComponent(tabName)}!A2:L`,
+      "GET"
+    );
+  } catch {
+    // Tab doesn't exist yet (e.g. no entries logged this month) — no error, just empty.
+    return [];
+  }
+
+  const rows: string[][] = data.values || [];
+  // Drop blank spacer rows (no Date in column G, index 6)
+  const nonBlank = rows.filter((r) => r[6]);
+  // Sheet is in chronological (ascending) order — take the last `limit`
+  // rows and reverse so the most recent entry comes first.
+  return nonBlank.slice(-limit).reverse();
 }

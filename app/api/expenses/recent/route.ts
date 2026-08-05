@@ -13,14 +13,15 @@ export async function GET() {
 
   try {
     const rows = await listRecentExpenses(session.accessToken, session.sheetId, monthTabName(), 20);
-    // Columns: Expense Type, Category, Amount, Merchant, Rate, Qty, Date, Notes, Source, Timestamp
+    // Columns (matches the actual sheet): Expense Type, Category, Merchant,
+    // Rate, Qty, Amount, Date, Final Bill, Notes, Source, Raw OCR Ref, Timestamp
     const expenses = rows.map((r) => ({
       expenseType: r[0] || '',
       category: r[1] || '',
-      amount: r[2] || '',
-      merchant: r[3] || '',
+      merchant: r[2] || '',
+      amount: r[5] || '',
       date: r[6] || '',
-      source: r[8] || '',
+      source: r[9] || '',
     }));
     return NextResponse.json({ expenses });
   } catch (err) {
