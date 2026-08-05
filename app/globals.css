@@ -143,6 +143,73 @@ select:focus {
   margin-bottom: 6px;
 }
 
+/* --- Passbook balance line ---
+   The one bold addition: a running month total styled like the balance
+   row in a physical passbook — big mono figure, ink-on-paper, sitting
+   under a heavy rule that echoes the masthead's border treatment. */
+.ledger-balance {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+}
+
+.ledger-balance-label {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.ledger-balance-value {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.sheet-link-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+
+/* --- Day grouping --- */
+.day-group {
+  margin-top: 18px;
+}
+
+.day-group:first-child {
+  margin-top: 0;
+}
+
+.day-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--paper-line);
+}
+
+.day-heading-label {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.day-heading-subtotal {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
 .entry-row {
   display: flex;
   justify-content: space-between;
@@ -164,10 +231,24 @@ select:focus {
   color: var(--ink-soft);
 }
 
+.entry-right {
+  text-align: right;
+  flex-shrink: 0;
+  padding-left: 12px;
+}
+
 .entry-amount {
   font-family: var(--font-mono);
   font-size: 16px;
   font-weight: 600;
+}
+
+.entry-source {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-top: 2px;
 }
 
 .empty-state {
@@ -185,6 +266,40 @@ select:focus {
 
 .status-line.error {
   color: var(--danger);
+}
+
+/* --- Loading skeleton --- */
+.skeleton-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--paper-line);
+}
+
+.skeleton-row:last-child {
+  border-bottom: none;
+}
+
+.skeleton-bar {
+  height: 12px;
+  border-radius: 2px;
+  background: var(--paper-line);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton-bar {
+    animation: skeleton-pulse 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 a {

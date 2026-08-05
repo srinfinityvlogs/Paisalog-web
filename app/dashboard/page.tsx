@@ -8,7 +8,7 @@ type Expense = {
   category: string;
   amount: string;
   merchant: string;
-  date: string;
+  date: string; // DD/MM/YYYY
   source: string;
 };
 
@@ -22,10 +22,69 @@ function todayIso(): string {
 }
 
 // Converts "YYYY-MM-DD" (what the date input gives us) into "DD/MM/YYYY"
-// (what the Sheet's column G and the rest of the backend expect).
+// (what the Sheet's column and the rest of the backend expect).
 function isoToSheetDate(iso: string): string {
   const [yyyy, mm, dd] = iso.split('-');
   return `${dd}/${mm}/${yyyy}`;
+}
+
+// Parses "DD/MM/YYYY" into a Date. Sheet dates are never ISO, so this
+// must not be replaced with `new Date(string)`.
+function parseSheetDate(value: string): Date | null {
+  const parts = value.split('/');
+  if (parts.length !== 3) return null;
+  const [dd, mm, yyyy] = parts.map(Number);
+  if (!dd || !mm || !yyyy) return null;
+  return new Date(yyyy, mm - 1, dd);
+}
+
+function formatAmount(raw: string): string {
+  const n = Number(String(raw).replace(/,/g, ''));
+  if (!Number.isFinite(n)) return raw;
+  return n.toLocaleString('en-IN');
+}
+
+function sumAmounts(items: Expense[]): number {
+  return items.reduce((total, e) => total + (Number(String(e.amount).replace(/,/g, '')) || 0), 0);
+}
+
+// Groups already-newest-first expenses into day buckets, preserving order.
+function groupByDay(items: Expense[]): { date: string; label: string; items: Expense[] }[] {
+  const todayStr = isoToSheetDate(todayIso());
+  const groups: { date: string; label: string; items: Expense[] }[] = [];
+
+  for (const exp of items) {
+    let group = groups.find((g) => g.date === exp.date);
+    if (!group) {
+      let label = exp.date;
+      if (exp.date === todayStr) {
+        label = 'Today';
+      } else {
+        const parsed = parseSheetDate(exp.date);
+        if (parsed) {
+          label = parsed.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
+        }
+      }
+      group = { date: exp.date, label, items: [] };
+      groups.push(group);
+    }
+    group.items.push(exp);
+  }
+
+  return groups;
+}
+
+function SkeletonList() {
+  return (
+    <>
+      {[1, 2, 3].map((i) => (
+        <div className="skeleton-row" key={i}>
+          <div className="skeleton-bar" style={{ width: '45%' }} />
+          <div className="skeleton-bar" style={{ width: '20%' }} />
+        </div>
+      ))}
+    </>
+  );
 }
 
 export default function DashboardPage() {
@@ -87,7 +146,7 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Something went wrong');
-      setStatusMsg({ text: `Logged ${data.category} — ${data.amount}` });
+      setStatusMsg({ text: `Logged ${data.category} — ₹${formatAmount(String(data.amount))}` });
       setCategory('');
       setAmount('');
       setDate(todayIso());
@@ -114,6 +173,9 @@ export default function DashboardPage() {
       </main>
     );
   }
+
+  const monthTotal = expenses ? sumAmounts(expenses) : null;
+  const dayGroups = expenses ? groupByDay(expenses) : [];
 
   return (
     <main className="shell">
@@ -170,21 +232,46 @@ export default function DashboardPage() {
           </div>
 
           <div className="card">
-            <p style={{ marginTop: 0, fontSize: 13, color: 'var(--ink-soft)' }}>
-              This month &middot;{' '}
+            <div className="sheet-link-line">
+              <span>This month</span>
               <a href={`https://docs.google.com/spreadsheets/d/${session.sheetId}/edit`} target="_blank" rel="noreferrer">
                 Open full Sheet
               </a>
-            </p>
-            {expenses === null && <p>Loading entries…</p>}
-            {expenses?.length === 0 && <div className="empty-state">Nothing logged yet this month.</div>}
-            {expenses?.map((exp, i) => (
-              <div className="entry-row" key={i}>
-                <div>
-                  <div className="entry-category">{exp.category}</div>
-                  <div className="entry-meta">{exp.expenseType}{exp.merchant ? ` · ${exp.merchant}` : ''}</div>
+            </div>
+
+            <div className="ledger-balance">
+              <span className="ledger-balance-label">Total spent</span>
+              <span className="ledger-balance-value">
+                {monthTotal === null ? '—' : `₹${monthTotal.toLocaleString('en-IN')}`}
+              </span>
+            </div>
+
+            {expenses === null && <SkeletonList />}
+
+            {expenses?.length === 0 && (
+              <div className="empty-state">
+                The ledger is empty this month. Log your first expense above.
+              </div>
+            )}
+
+            {dayGroups.map((group) => (
+              <div className="day-group" key={group.date}>
+                <div className="day-heading">
+                  <span className="day-heading-label">{group.label}</span>
+                  <span className="day-heading-subtotal">₹{sumAmounts(group.items).toLocaleString('en-IN')}</span>
                 </div>
-                <div className="entry-amount">{exp.amount}</div>
+                {group.items.map((exp, i) => (
+                  <div className="entry-row" key={i}>
+                    <div>
+                      <div className="entry-category">{exp.category}</div>
+                      <div className="entry-meta">{exp.expenseType}{exp.merchant ? ` · ${exp.merchant}` : ''}</div>
+                    </div>
+                    <div className="entry-right">
+                      <div className="entry-amount">₹{formatAmount(exp.amount)}</div>
+                      {exp.source && <div className="entry-source">{exp.source}</div>}
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
