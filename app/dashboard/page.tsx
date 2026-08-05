@@ -12,11 +12,28 @@ type Expense = {
   source: string;
 };
 
+// Returns today's date as "YYYY-MM-DD", the format <input type="date"> requires.
+function todayIso(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// Converts "YYYY-MM-DD" (what the date input gives us) into "DD/MM/YYYY"
+// (what the Sheet's column G and the rest of the backend expect).
+function isoToSheetDate(iso: string): string {
+  const [yyyy, mm, dd] = iso.split('-');
+  return `${dd}/${mm}/${yyyy}`;
+}
+
 export default function DashboardPage() {
   const { data: session, status, update } = useSession();
   const [settingUp, setSettingUp] = useState(false);
   const [category, setCategory] = useState('');
   const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(todayIso());
   const [saving, setSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
@@ -52,19 +69,28 @@ export default function DashboardPage() {
       setStatusMsg({ text: 'Enter a category and an amount greater than 0.', error: true });
       return;
     }
+    if (!date) {
+      setStatusMsg({ text: 'Pick a date.', error: true });
+      return;
+    }
     setSaving(true);
     setStatusMsg(null);
     try {
       const res = await fetch('/api/expenses/log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, amount: amt }),
+        body: JSON.stringify({
+          category,
+          amount: amt,
+          date: isoToSheetDate(date),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Something went wrong');
       setStatusMsg({ text: `Logged ${data.category} — ${data.amount}` });
       setCategory('');
       setAmount('');
+      setDate(todayIso());
       loadExpenses();
     } catch (err) {
       setStatusMsg({ text: err instanceof Error ? err.message : 'Failed to save', error: true });
@@ -125,6 +151,16 @@ export default function DashboardPage() {
                     style={{ maxWidth: 110 }}
                   />
                 </div>
+              </div>
+              <div className="field">
+                <label htmlFor="date">Date</label>
+                <input
+                  id="date"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  max={todayIso()}
+                />
               </div>
               <button className="btn" type="submit" disabled={saving}>
                 {saving ? 'Saving…' : 'Log expense'}

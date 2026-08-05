@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { insertExpenseRowOrdered } from "@/lib/sheetsApi";
+import { classify } from "@/lib/categories";
 
 export async function POST(req: Request) {
   const session = await auth();
@@ -17,14 +18,13 @@ export async function POST(req: Request) {
   }
 
   let body: {
-    expenseType: string;
     category: string;
-    merchant: string;
-    rate: number;
-    qty: number;
     amount: number;
     date: string; // expected format: DD/MM/YYYY, matches sheet column G
-    finalBill: number;
+    merchant?: string;
+    rate?: number;
+    qty?: number;
+    finalBill?: number;
     notes?: string;
   };
 
@@ -34,10 +34,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  // Basic validation — adjust required fields to match your actual form
-  if (!body.amount || !body.date || !body.expenseType) {
+  // Only category, amount, and date come from the form now.
+  // expenseType is derived server-side via classify(), not sent by the client.
+  if (!body.category || !body.amount || !body.date) {
     return NextResponse.json(
-      { error: "Missing required fields: expenseType, amount, date" },
+      { error: "Missing required fields: category, amount, date" },
       { status: 400 }
     );
   }
@@ -51,19 +52,31 @@ export async function POST(req: Request) {
     );
   }
 
+  const amt = Number(body.amount);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    return NextResponse.json(
+      { error: "amount must be a positive number" },
+      { status: 400 }
+    );
+  }
+
+  // Derive category + expenseType from the raw text the user typed,
+  // same classification logic the bot uses.
+  const { category: resolvedCategory, expenseType } = classify(body.category);
+
   try {
     const result = await insertExpenseRowOrdered(
       session.accessToken,
       session.sheetId,
       {
-        expenseType: body.expenseType,
-        category: body.category ?? "",
+        expenseType,
+        category: resolvedCategory,
         merchant: body.merchant ?? "",
         rate: body.rate ?? 0,
         qty: body.qty ?? 1,
-        amount: body.amount,
+        amount: amt,
         date: body.date,
-        finalBill: body.finalBill ?? body.amount,
+        finalBill: body.finalBill ?? amt,
         notes: body.notes ?? "",
         source: "Web",
       }
@@ -71,6 +84,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
+      category: resolvedCategory,
+      expenseType,
+      amount: amt,
       tabName: result.tabName,
       rowNumber: result.rowNumber,
     });
