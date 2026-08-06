@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
 
 type Expense = {
@@ -97,6 +98,7 @@ function SkeletonList() {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { data: session, status, update } = useSession();
   const [settingUp, setSettingUp] = useState(false);
   const [category, setCategory] = useState('');
@@ -270,6 +272,14 @@ export default function DashboardPage() {
               </button>
               {statusMsg && <p className={`status-line ${statusMsg.error ? 'error' : ''}`}>{statusMsg.text}</p>}
             </form>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ marginTop: 10 }}
+              onClick={() => router.push('/dashboard/scan')}
+            >
+              📷 Scan a receipt
+            </button>
           </div>
 
           <div className="card">

@@ -130,7 +130,8 @@ export async function insertExpenseRowOrdered(
     notes: string;
     source: "Web" | "Telegram";
     rawOcrRef?: string;
-  }
+  },
+  addBlankRowAfter: boolean = true
 ) {
   const expenseDate = parseSheetDate(expense.date);
   const tabName = monthTabName(expenseDate);
@@ -159,8 +160,11 @@ export async function insertExpenseRowOrdered(
     new Date().toISOString(),
   ];
 
-  // Insert 2 rows: the entry row + a blank spacer row after it,
-  // matching the bot's readability convention.
+  // Insert the entry row, plus a blank spacer row after it (unless this is
+  // one item of a multi-item receipt that isn't the last one — in that
+  // case the blank row only gets added after the final item, matching the
+  // bot's "one blank row per logged entry, not per item" convention).
+  const rowsToInsert = addBlankRowAfter ? 2 : 1;
   await sheetsRequest(accessToken, spreadsheetId, ":batchUpdate", "POST", {
     requests: [
       {
@@ -169,7 +173,7 @@ export async function insertExpenseRowOrdered(
             sheetId,
             dimension: "ROWS",
             startIndex: insertRowIndex,
-            endIndex: insertRowIndex + 2,
+            endIndex: insertRowIndex + rowsToInsert,
           },
           inheritFromBefore: false,
         },
@@ -203,6 +207,44 @@ async function updateMeta(
     `/values/Meta!A2:A3?valueInputOption=RAW`,
     "PUT",
     { values: [[tabName], [rowNumber]] }
+  );
+}
+
+// Ensures the RawOCR tab exists (columns: ReceiptId | Timestamp | Raw OCR
+// Text), matching the bot's existing tab of the same name and shape.
+async function ensureRawOcrTab(accessToken: string, spreadsheetId: string): Promise<void> {
+  const meta = await sheetsRequest(accessToken, spreadsheetId, "", "GET");
+  const existing = meta.sheets?.find((s: any) => s.properties.title === "RawOCR");
+  if (existing) return;
+
+  await sheetsRequest(accessToken, spreadsheetId, ":batchUpdate", "POST", {
+    requests: [{ addSheet: { properties: { title: "RawOCR" } } }],
+  });
+  await sheetsRequest(
+    accessToken,
+    spreadsheetId,
+    `/values/RawOCR!A1:C1?valueInputOption=RAW`,
+    "PUT",
+    { values: [["ReceiptId", "Timestamp", "Raw OCR Text"]] }
+  );
+}
+
+// Stores the full OCR text for one receipt, once, referenced by a short
+// receiptId from the item rows' "Raw Input/Raw OCR Text" column — avoids
+// duplicating the full text on every item row of a multi-item receipt.
+export async function appendRawOcrText(
+  accessToken: string,
+  spreadsheetId: string,
+  receiptId: string,
+  rawText: string
+): Promise<void> {
+  await ensureRawOcrTab(accessToken, spreadsheetId);
+  await sheetsRequest(
+    accessToken,
+    spreadsheetId,
+    `/values/RawOCR!A:C:append?valueInputOption=USER_ENTERED`,
+    "POST",
+    { values: [[receiptId, new Date().toISOString(), rawText]] }
   );
 }
 
