@@ -138,10 +138,24 @@ export default function ScanReceiptPage() {
           rawText,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save');
+
+      const rawBody = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        // Server returned something that isn't JSON at all (e.g. a raw
+        // error page, an HTML 500 page, or a truncated response) — surface
+        // the actual response so we can see what really happened, instead
+        // of a confusing generic parse error.
+        console.error('Non-JSON response from /api/receipts/save:', res.status, rawBody);
+        throw new Error(`Server returned ${res.status}: ${rawBody.slice(0, 200)}`);
+      }
+
+      if (!res.ok) throw new Error(data.error || `Save failed (${res.status})`);
       router.push('/dashboard');
     } catch (err) {
+      console.error('Save receipt failed:', err);
       setErrorMsg(err instanceof Error ? err.message : 'Failed to save receipt.');
       setStep('confirm');
     }
