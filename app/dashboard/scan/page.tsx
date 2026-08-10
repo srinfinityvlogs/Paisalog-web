@@ -120,6 +120,10 @@ export default function ScanReceiptPage() {
       setErrorMsg('Every item needs a name, or remove the empty row.');
       return;
     }
+    if (itemsTotal <= 0) {
+      setErrorMsg('Total amount must be greater than ₹0 — check the items for a bad OCR read before saving.');
+      return;
+    }
 
     setStep('saving');
     setErrorMsg('');

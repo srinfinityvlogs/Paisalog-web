@@ -44,6 +44,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "date must be in DD/MM/YYYY format" }, { status: 400 });
   }
 
+  const itemsTotal = (body.items || []).reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+  const fallbackTotal = Number(body.total) || 0;
+  if (itemsTotal <= 0 && fallbackTotal <= 0) {
+    return NextResponse.json(
+      { error: "Total amount must be greater than 0 — check for a bad OCR read before saving." },
+      { status: 400 }
+    );
+  }
+
   // Same short-reference-id scheme the bot uses for its Pending/RawOCR flow.
   const receiptId = crypto.randomBytes(6).toString("hex");
 
